@@ -1,10 +1,13 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");
 const bcrypt = require("bcryptjs");
-const { User, Vote, sequelize } = require("./models");
+const { User, Vote, sequelize, Candidates } = require("./models");
 const app = express();
-const PORT = 3000;
+const PORT = 3001;
+
+app.use(cors());
 
 const SECRET_KEY = "your_secret_key";
 
@@ -25,10 +28,10 @@ function authenticateToken(req, res, next) {
 
 // Route to register a new user
 app.post("/register", async (req, res) => {
-  const { username, password } = req.body;
+  const { firstName, lastName, username, password } = req.body;
 
   // Check if username or password is missing
-  if (!username || !password) {
+  if (!username || !password || !firstName || !lastName) {
     return res
       .status(400)
       .json({ message: "Username and password are required" });
@@ -45,7 +48,12 @@ app.post("/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create the user
-    await User.create({ username, password: hashedPassword });
+    await User.create({
+      firstName,
+      lastName,
+      username,
+      password: hashedPassword,
+    });
     res.status(201).json({ message: "User registered successfully" });
   } catch (error) {
     console.error(error); // Log the error for debugging purposes
@@ -62,6 +70,9 @@ app.post("/login", async (req, res) => {
 
   // Find the user by username
   const user = await User.findOne({ where: { username } });
+
+  console.log("this is user", user);
+
   // If user does not exist, return an error
   if (!user) {
     return res.status(400).json({ message: "Invalid username or password" });
@@ -80,16 +91,19 @@ app.post("/login", async (req, res) => {
   });
 
   // Return the token in the response
-  res.json({ token });
+  res.json({ token, user });
 });
 
 // Route to cast a vote (protected)
-app.post("/vote", authenticateToken, async (req, res) => {
-  const { candidate } = req.body; // Destructure candidate from request body
-  const username = req.user.username; // Get username from authenticated token
+app.post("/vote", async (req, res) => {
+  const { candidate, username } = req.body; // Destructure candidate from request body
 
   // Find the user by username
-  const user = await User.findOne({ where: { username } });
+  const user = await User.findOne({ where: { username: username } });
+
+  if (!candidate) {
+    return res.status(400).json({ message: "No candidate selected" });
+  }
 
   // Check if the user has already voted
   const userVote = await Vote.findOne({ where: { UserId: user.id } });
@@ -97,20 +111,16 @@ app.post("/vote", authenticateToken, async (req, res) => {
     return res.status(400).json({ message: "User has already voted" });
   }
 
-  // Check if the candidate is valid
-  if (["candidateA", "candidateB"].includes(candidate)) {
-    // Create a new vote
-    await Vote.create({ candidate, UserId: user.id });
-    // Respond with a success message
-    res.status(200).json({ message: `Vote cast for ${candidate}` });
-  } else {
-    // Respond with an error message if the candidate is invalid
-    res.status(400).json({ message: "Invalid candidate" });
-  }
+  // Create a new vote
+  await Vote.create({ candidate, UserId: user.id });
+  await Candidates.increment("votes", { by: 1, where: { id: candidate } });
+
+  // Respond with a success message
+  res.status(200).json({ message: `Vote casted successfully` });
 });
 
 // Route to get vote counts (protected)
-app.get("/votes", authenticateToken, async (req, res) => {
+app.get("/votes", async (req, res) => {
   // Fetch all votes from the database
   const votes = await Vote.findAll();
 
@@ -122,6 +132,22 @@ app.get("/votes", authenticateToken, async (req, res) => {
 
   // Respond with the vote counts
   res.status(200).json(voteCounts);
+});
+
+app.get("/candidates", async (req, res) => {
+  // Fetch all votes from the database
+  const candidates = await Candidates.findAll();
+
+  // Respond with the vote counts
+  res.status(200).json(candidates);
+});
+
+app.get("/users", async (req, res) => {
+  // Fetch all votes from the database
+  const users = await User.findAll();
+
+  // Respond with the user counts
+  res.status(200).json(users);
 });
 
 // Start the server by running npm start on the terminal
